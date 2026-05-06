@@ -3,26 +3,12 @@ import boto3
 import logging
 from datetime import datetime, timedelta
 from mcp.server.fastmcp import FastMCP
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import PlainTextResponse
 
 # --- SETUP LOGGING ---
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# --- 1. THE SECURITY BOUNCER (Auth Middleware) ---
-class TokenAuthMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request, call_next):
-        expected_token = os.getenv("API_SECRET_TOKEN")
-        client_token = request.headers.get("X-API-Key")
-        
-        if not expected_token or client_token != expected_token:
-            logger.warning("Blocked unauthorized connection attempt!")
-            return PlainTextResponse("Unauthorized", status_code=401)
-            
-        return await call_next(request)
-
-# --- 2. MCP SERVER & AWS TOOLS ---
+# --- 1. MCP SERVER & AWS TOOLS ---
 mcp = FastMCP("CloudVantage")
 
 @mcp.tool()
@@ -54,7 +40,10 @@ def calculate_ri_savings(instance_type: str, current_price: float):
     except Exception as e:
         return f"Calculation Error: Ensure price is a valid number. Details: {str(e)}"
 
-# --- 3. CREATE THE APP ---
-# We let FastMCP generate the ASGI app for us, then add our Bouncer!
-app = mcp.get_asgi_app()
-app.add_middleware(TokenAuthMiddleware)
+# --- 2. RUN THE SERVER ---
+# This runs FastMCP directly using its built-in SSE server on port 10000
+if __name__ == "__main__":
+    port = int(os.environ.get("PORT", "10000"))
+    mcp.settings.port = port
+    mcp.settings.host = "0.0.0.0"
+    mcp.run(transport="sse")
